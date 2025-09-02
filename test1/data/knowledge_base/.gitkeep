@@ -1,0 +1,2 @@
+# This file ensures the knowledge_base directory is tracked in git
+# Uploaded files will be ignored by .gitignore but this directory structure is preserved

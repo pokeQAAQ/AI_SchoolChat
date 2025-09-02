@@ -1,0 +1,44 @@
+# 忽略编译文件和临时文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+pip-log.txt
+pip-delete-this-directory.txt
+.tox
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git
+.mypy_cache
+.pytest_cache
+.hypothesis
+
+# 忽略知识库上传的文件
+test1/data/knowledge_base/*
+!test1/data/knowledge_base/.gitkeep
+
+# 忽略数据库文件
+*.db
+*.db.backup
+
+# 忽略IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 忽略系统文件
+.DS_Store
+Thumbs.db
+
+# 忽略临时文件
+*.tmp
+temp/
