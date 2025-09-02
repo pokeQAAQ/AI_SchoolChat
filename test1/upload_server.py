@@ -415,7 +415,16 @@ UPLOAD_TEMPLATE = """
         }
         
         .file-input {
-            display: none;
+            width: 100%;
+            padding: 15px;
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            background: #f8f9fa;
+            cursor: pointer;
+            transition: border-color 0.3s, background 0.3s;
+            pointer-events: auto;
+            position: relative;
+            z-index: 1;
         }
         
         .file-input-label {
@@ -490,15 +499,7 @@ UPLOAD_TEMPLATE = """
             margin-bottom: 15px;
         }
         
-        .file-input {
-            width: 100%;
-            padding: 15px;
-            border: 2px dashed #ddd;
-            border-radius: 8px;
-            background: #f8f9fa;
-            cursor: pointer;
-            transition: border-color 0.3s, background 0.3s;
-        }
+
         
         .file-input:hover {
             border-color: #4a90e2;
@@ -557,6 +558,44 @@ UPLOAD_TEMPLATE = """
             transform: none;
             box-shadow: none;
             opacity: 0.6;
+        }
+        
+        .upload-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .select-file-btn {
+            background: linear-gradient(45deg, #4a90e2, #357abd);
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            pointer-events: auto;
+            position: relative;
+            z-index: 2;
+        }
+        
+        .select-file-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(74, 144, 226, 0.4);
+        }
+        
+        .select-file-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+            opacity: 0.6;
+        }
+        
+        .upload-btn {
+            flex: 1;
         }
         
         .file-input:disabled {
@@ -684,7 +723,10 @@ UPLOAD_TEMPLATE = """
                     
                     <div id="file-list" class="file-list"></div>
                     
-                    <button type="submit" id="uploadBtn" class="upload-btn">📤 上传文件</button>
+                    <div class="upload-buttons">
+                        <button type="button" id="selectFileBtn" class="select-file-btn">📂 选择文件</button>
+                        <button type="submit" id="uploadBtn" class="upload-btn">📤 上传文件</button>
+                    </div>
                     
                     <div id="capacity-message" class="capacity-message" style="display: none;"></div>
                 </form>
@@ -771,7 +813,9 @@ UPLOAD_TEMPLATE = """
             // 启用控件，允许用户尝试上传
             const fileInput = document.getElementById('fileInput');
             const uploadBtn = document.getElementById('uploadBtn');
+            const selectFileBtn = document.getElementById('selectFileBtn');
             fileInput.disabled = false;
+            selectFileBtn.disabled = false;
             uploadBtn.disabled = fileInput.files.length === 0;
             if (fileInput.files.length > 0) {
                 uploadBtn.textContent = '📤 上传文件';
@@ -790,6 +834,7 @@ UPLOAD_TEMPLATE = """
         
         function updateUploadControls() {
             const uploadBtn = document.getElementById('uploadBtn');
+            const selectFileBtn = document.getElementById('selectFileBtn');
             const fileInput = document.getElementById('fileInput');
             const capacityMsg = document.getElementById('capacity-message');
             const warningDiv = document.getElementById('usage-warning');
@@ -804,12 +849,14 @@ UPLOAD_TEMPLATE = """
                 // 容量已满：禁用控件但保持可见，显示说明消息
                 fileInput.disabled = true;
                 uploadBtn.disabled = true;
+                selectFileBtn.disabled = true;
                 uploadBtn.textContent = '🚫 存储空间已满';
                 capacityMsg.textContent = '容量已满，无法上传。请删除部分文件后重试。';
                 capacityMsg.style.display = 'block';
             } else {
                 // 容量未满：启用控件
                 fileInput.disabled = false;
+                selectFileBtn.disabled = false;
                 capacityMsg.style.display = 'none';
                 
                 if (fileInput.files.length === 0) {
@@ -920,6 +967,14 @@ UPLOAD_TEMPLATE = """
                 }, 3000);
             }
         }
+        
+        // 选择文件按钮点击事件 - 在用户手势中触发文件选择器
+        document.getElementById('selectFileBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            const fileInput = document.getElementById('fileInput');
+            // 直接在用户手势中调用 click() 确保文件选择器能正常打开
+            fileInput.click();
+        });
         
         // 页面加载时获取使用情况
         loadUsage();
