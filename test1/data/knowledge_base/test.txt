@@ -1,3 +1,0 @@
-This is a test file for the knowledge base upload feature.
-这是一个测试文件，用于知识库上传功能。
-测试内容包括中文字符。

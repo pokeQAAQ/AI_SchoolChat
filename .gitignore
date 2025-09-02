@@ -1,0 +1,21 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Knowledge base test files (optional - you may want to keep these)
+test1/data/knowledge_base/test*.txt
+test1/data/knowledge_base/test*.md
+
+# Environment variables
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
