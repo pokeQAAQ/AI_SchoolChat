@@ -84,8 +84,8 @@ class Config:
     def __init__(self):
         # 知识库文件存储配置
         self.KNOWLEDGE_BASE_DIR = os.environ.get('KNOWLEDGE_BASE_DIR', './data/knowledge_base')
-        self.KNOWLEDGE_BASE_MAX_BYTES = int(os.environ.get('KNOWLEDGE_BASE_MAX_BYTES', '209715200'))  # 200MB
-        self.KNOWLEDGE_BASE_MAX_FILE_BYTES = int(os.environ.get('KNOWLEDGE_BASE_MAX_FILE_BYTES', '52428800'))  # 50MB
+        self.KNOWLEDGE_BASE_MAX_BYTES = int(os.environ.get('KNOWLEDGE_BASE_MAX_BYTES', '1073741824'))  # 1GB default
+        self.KNOWLEDGE_BASE_MAX_FILE_BYTES = int(os.environ.get('KNOWLEDGE_BASE_MAX_FILE_BYTES', '10485760'))  # 10MB default
         
         # 允许的文件扩展名
         self.ALLOWED_EXTENSIONS = {'.pdf', '.doc', '.docx', '.md', '.markdown', '.txt'}
@@ -556,6 +556,34 @@ UPLOAD_TEMPLATE = """
             cursor: not-allowed;
             transform: none;
             box-shadow: none;
+            opacity: 0.6;
+        }
+        
+        .file-input:disabled {
+            background: #e9ecef;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        
+        .capacity-message {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .usage-warning {
+            margin-top: 8px;
+            padding: 8px;
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+            border-radius: 4px;
+            font-size: 13px;
         }
         
 
@@ -634,48 +662,20 @@ UPLOAD_TEMPLATE = """
 
             <!-- 文件上传部分 -->
             <div class="file-upload-section">
-                <div class="section-header">
-                    <h3>📁 上传本地知识库</h3>
-                    <p class="section-subtext">支持 .pdf .doc .docx .md .markdown .txt。将文件保存到本地知识库文件夹，仅用于存储，不参与对话。</p>
-                </div>
-                
-                <div class="usage-display">
-                    <div class="usage-text">
-                        <span id="usage-info">正在加载存储信息...</span>
-                    </div>
-                    <div class="progress-bar-container">
-                        <div class="progress-bar">
-                            <div id="progress-fill" class="progress-fill"></div>
-
-            <!-- 文件上传区域 -->
-            <div class="file-upload-section">
                 <h2>📁 上传本地知识库</h2>
                 <div class="subtext">
-                    支持 .pdf .doc .docx .md .markdown。将文件保存到本地知识库文件夹，仅用于存储，不参与对话。
+                    支持 .pdf .doc .docx .md .markdown .txt。将文件保存到本地知识库文件夹，仅用于存储，不参与对话。
                 </div>
                 
                 <div class="usage-info">
                     <div id="usage-text">正在加载使用情况...</div>
                     <div class="usage-bar">
                         <div id="usage-progress" class="usage-progress" style="width: 0%"></div>
-
                     </div>
+                    <div id="usage-warning" class="usage-warning" style="display: none;"></div>
                 </div>
                 
                 <form id="fileUploadForm" enctype="multipart/form-data">
-
-                    <div class="file-input-container">
-                        <input type="file" id="files" name="files" multiple accept=".pdf,.doc,.docx,.md,.markdown,.txt" class="file-input">
-                        <label for="files" class="file-input-label">
-                            📎 选择文件 (可多选)
-                        </label>
-                        <div id="selected-files" class="selected-files"></div>
-                    </div>
-                    
-                    <button type="submit" id="upload-btn" class="upload-btn" disabled>
-                        📤 上传文件
-                    </button>
-
                     <div class="file-input-wrapper">
                         <input type="file" id="fileInput" name="files" multiple 
                                accept=".pdf,.doc,.docx,.md,.markdown,.txt"
@@ -685,7 +685,8 @@ UPLOAD_TEMPLATE = """
                     <div id="file-list" class="file-list"></div>
                     
                     <button type="submit" id="uploadBtn" class="upload-btn">📤 上传文件</button>
-
+                    
+                    <div id="capacity-message" class="capacity-message" style="display: none;"></div>
                 </form>
                 
                 <div id="file-status" class="status"></div>
@@ -740,7 +741,7 @@ UPLOAD_TEMPLATE = """
         });
         
         // 文件上传功能
-        let currentUsage = { used_bytes: 0, max_bytes: 200 * 1024 * 1024, percent: 0 };
+        let currentUsage = { used_bytes: 0, max_bytes: 1073741824, percent: 0 };
         
         // 加载使用情况
         function loadUsage() {
@@ -750,36 +751,74 @@ UPLOAD_TEMPLATE = """
                     if (data.success) {
                         currentUsage = data;
                         updateUsageDisplay();
-                        updateUploadButton();
+                        updateUploadControls();
                     } else {
-                        document.getElementById('usage-text').textContent = '无法获取使用情况';
+                        handleUsageLoadError('无法获取使用情况');
                     }
                 })
                 .catch(error => {
                     console.error('加载使用情况失败:', error);
-                    document.getElementById('usage-text').textContent = '加载使用情况失败';
+                    handleUsageLoadError('用量信息获取失败，仍可尝试上传。');
                 });
         }
         
-        function updateUsageDisplay() {
-            document.getElementById('usage-text').textContent = 
-                `已使用: ${currentUsage.used_human} / ${currentUsage.max_human} (${currentUsage.percent}%)`;
-            document.getElementById('usage-progress').style.width = currentUsage.percent + '%';
+        function handleUsageLoadError(message) {
+            document.getElementById('usage-text').textContent = '加载使用情况失败';
+            const warningDiv = document.getElementById('usage-warning');
+            warningDiv.textContent = message;
+            warningDiv.style.display = 'block';
+            
+            // 启用控件，允许用户尝试上传
+            const fileInput = document.getElementById('fileInput');
+            const uploadBtn = document.getElementById('uploadBtn');
+            fileInput.disabled = false;
+            uploadBtn.disabled = fileInput.files.length === 0;
+            if (fileInput.files.length > 0) {
+                uploadBtn.textContent = '📤 上传文件';
+            } else {
+                uploadBtn.textContent = '📤 请选择文件';
+            }
         }
         
-        function updateUploadButton() {
+        function updateUsageDisplay() {
+            // 限制进度条百分比在0-100之间
+            const clampedPercent = Math.max(0, Math.min(100, currentUsage.percent));
+            document.getElementById('usage-text').textContent = 
+                `已使用: ${currentUsage.used_human} / ${currentUsage.max_human} (${clampedPercent}%)`;
+            document.getElementById('usage-progress').style.width = clampedPercent + '%';
+        }
+        
+        function updateUploadControls() {
             const uploadBtn = document.getElementById('uploadBtn');
             const fileInput = document.getElementById('fileInput');
+            const capacityMsg = document.getElementById('capacity-message');
+            const warningDiv = document.getElementById('usage-warning');
             
-            if (currentUsage.percent >= 100) {
+            // 隐藏警告信息（如果之前显示过）
+            warningDiv.style.display = 'none';
+            
+            // 检查容量是否已满
+            const isFull = currentUsage.used_bytes >= currentUsage.max_bytes || currentUsage.percent >= 100;
+            
+            if (isFull) {
+                // 容量已满：禁用控件但保持可见，显示说明消息
+                fileInput.disabled = true;
                 uploadBtn.disabled = true;
                 uploadBtn.textContent = '🚫 存储空间已满';
-            } else if (fileInput.files.length === 0) {
-                uploadBtn.disabled = true;
-                uploadBtn.textContent = '📤 请选择文件';
+                capacityMsg.textContent = '容量已满，无法上传。请删除部分文件后重试。';
+                capacityMsg.style.display = 'block';
             } else {
-                uploadBtn.disabled = false;
-                uploadBtn.textContent = '📤 上传文件';
+                // 容量未满：启用控件
+                fileInput.disabled = false;
+                capacityMsg.style.display = 'none';
+                
+                if (fileInput.files.length === 0) {
+                    uploadBtn.disabled = true;
+                    uploadBtn.textContent = '📤 请选择文件';
+                } else {
+                    uploadBtn.disabled = false;
+                    uploadBtn.textContent = '📤 上传文件';
+                }
             }
         }
         
@@ -790,7 +829,7 @@ UPLOAD_TEMPLATE = """
             
             if (files.length === 0) {
                 fileList.innerHTML = '';
-                updateUploadButton();
+                updateUploadControls();
                 return;
             }
             
@@ -803,7 +842,7 @@ UPLOAD_TEMPLATE = """
             });
             
             fileList.innerHTML = html;
-            updateUploadButton();
+            updateUploadControls();
         });
         
         // 文件上传表单提交
@@ -831,6 +870,7 @@ UPLOAD_TEMPLATE = """
             // 显示上传进度
             showFileStatus('📤 正在上传文件...', '');
             const uploadBtn = document.getElementById('uploadBtn');
+            const originalText = uploadBtn.textContent;
             uploadBtn.disabled = true;
             uploadBtn.textContent = '🔄 上传中...';
             
@@ -864,7 +904,7 @@ UPLOAD_TEMPLATE = """
                 console.error('文件上传错误:', error);
             })
             .finally(() => {
-                updateUploadButton();
+                updateUploadControls();
             });
         });
         
@@ -884,164 +924,7 @@ UPLOAD_TEMPLATE = """
         // 页面加载时获取使用情况
         loadUsage();
     </script>
-    
-    <!-- 文件上传功能脚本 -->
-    <script>
-        // 加载存储使用情况
-        function loadUsageInfo() {
-            fetch('/kb/usage')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        document.getElementById('usage-info').textContent = '加载存储信息失败';
-                        return;
-                    }
-                    
-                    const usageText = `已使用: ${data.used_human} / ${data.max_human} (${data.percent}%)`;
-                    document.getElementById('usage-info').textContent = usageText;
-                    document.getElementById('progress-fill').style.width = data.percent + '%';
-                    
-                    // 如果存储已满，禁用上传按钮
-                    const uploadBtn = document.getElementById('upload-btn');
-                    if (data.percent >= 100) {
-                        uploadBtn.disabled = true;
-                        uploadBtn.textContent = '📦 存储已满';
-                    }
-                })
-                .catch(error => {
-                    console.error('加载存储信息失败:', error);
-                    document.getElementById('usage-info').textContent = '加载存储信息失败';
-                });
-        }
-        
-        // 格式化文件大小
-        function formatFileSize(bytes) {
-            const units = ['B', 'KB', 'MB', 'GB'];
-            let size = bytes;
-            let unitIndex = 0;
-            
-            while (size >= 1024 && unitIndex < units.length - 1) {
-                size /= 1024;
-                unitIndex++;
-            }
-            
-            return `${size.toFixed(1)} ${units[unitIndex]}`;
-        }
-        
-        // 处理文件选择
-        document.getElementById('files').addEventListener('change', function(e) {
-            const files = e.target.files;
-            const selectedFilesDiv = document.getElementById('selected-files');
-            const uploadBtn = document.getElementById('upload-btn');
-            
-            if (files.length > 0) {
-                selectedFilesDiv.style.display = 'block';
-                selectedFilesDiv.innerHTML = '';
-                
-                for (let file of files) {
-                    const fileDiv = document.createElement('div');
-                    fileDiv.className = 'selected-file';
-                    fileDiv.innerHTML = `
-                        <span class="file-name">${file.name}</span>
-                        <span class="file-size">${formatFileSize(file.size)}</span>
-                    `;
-                    selectedFilesDiv.appendChild(fileDiv);
-                }
-                
-                uploadBtn.disabled = false;
-                uploadBtn.textContent = '📤 上传文件';
-            } else {
-                selectedFilesDiv.style.display = 'none';
-                uploadBtn.disabled = true;
-                uploadBtn.textContent = '📤 上传文件';
-            }
-        });
-        
-        // 处理文件上传
-        document.getElementById('fileUploadForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const formData = new FormData();
-            const files = document.getElementById('files').files;
-            const statusDiv = document.getElementById('file-status');
-            const uploadBtn = document.getElementById('upload-btn');
-            
-            if (files.length === 0) {
-                statusDiv.className = 'status error';
-                statusDiv.style.display = 'block';
-                statusDiv.textContent = '⚠️ 请选择要上传的文件';
-                return;
-            }
-            
-            // 添加所有文件到FormData
-            for (let file of files) {
-                formData.append('files', file);
-            }
-            
-            // 显示上传中状态
-            statusDiv.className = 'status';
-            statusDiv.style.display = 'block';
-            statusDiv.textContent = '📤 正在上传文件...';
-            uploadBtn.disabled = true;
-            uploadBtn.textContent = '⏳ 上传中...';
-            
-            fetch('/kb/upload', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    statusDiv.className = 'status success';
-                    let message = data.message;
-                    
-                    // 显示详细结果
-                    if (data.results && data.results.length > 0) {
-                        message += '\\n\\n详细结果：';
-                        data.results.forEach(result => {
-                            if (result.success) {
-                                message += `\\n✅ ${result.filename} (${result.size})`;
-                            } else {
-                                message += `\\n❌ ${result.filename}: ${result.message}`;
-                            }
-                        });
-                    }
-                    
-                    statusDiv.textContent = message;
-                    
-                    // 清空表单
-                    document.getElementById('fileUploadForm').reset();
-                    document.getElementById('selected-files').style.display = 'none';
-                    
-                    // 更新存储使用情况
-                    if (data.usage) {
-                        const usageText = `已使用: ${data.usage.used_human} / ${data.usage.max_human} (${data.usage.percent}%)`;
-                        document.getElementById('usage-info').textContent = usageText;
-                        document.getElementById('progress-fill').style.width = data.usage.percent + '%';
-                    } else {
-                        loadUsageInfo();
-                    }
-                } else {
-                    statusDiv.className = 'status error';
-                    statusDiv.textContent = '❌ ' + data.message;
-                }
-                
-                uploadBtn.disabled = true;
-                uploadBtn.textContent = '📤 上传文件';
-            })
-            .catch(error => {
-                statusDiv.className = 'status error';
-                statusDiv.textContent = '❌ 上传失败：' + error.message;
-                uploadBtn.disabled = true;
-                uploadBtn.textContent = '📤 上传文件';
-            });
-        });
-        
-        // 页面加载时获取存储使用情况
-        document.addEventListener('DOMContentLoaded', function() {
-            loadUsageInfo();
-        });
-    </script>
+
 </body>
 </html>
 """
@@ -1179,303 +1062,6 @@ def kb_usage():
             'success': False,
             'message': f'获取使用情况失败: {str(e)}'
         })
-
-@app.route('/kb/upload', methods=['POST'])
-def kb_upload():
-    """处理文件上传到知识库"""
-    try:
-        # 检查是否有文件
-        if 'files' not in request.files:
-            return jsonify({
-                'success': False,
-                'message': '未选择文件'
-            }), 400
-        
-        files = request.files.getlist('files')
-        if not files or all(f.filename == '' for f in files):
-            return jsonify({
-                'success': False,
-                'message': '未选择有效文件'
-            }), 400
-        
-        # 检查当前使用情况
-        current_used = get_folder_size(config.KNOWLEDGE_BASE_DIR)
-        
-        # 计算即将上传的文件总大小
-        incoming_size = 0
-        valid_files = []
-        
-        for file in files:
-            if file.filename == '':
-                continue
-                
-            # 检查文件扩展名
-            if not is_allowed_file(file.filename):
-                return jsonify({
-                    'success': False,
-                    'message': f'不支持的文件类型: {file.filename}。支持的类型: {", ".join(config.ALLOWED_EXTENSIONS)}'
-                }), 400
-            
-            # 检查单个文件大小（通过content-length头估算）
-            if hasattr(file, 'content_length') and file.content_length:
-                if file.content_length > config.KNOWLEDGE_BASE_MAX_FILE_BYTES:
-                    return jsonify({
-                        'success': False,
-                        'message': f'文件 {file.filename} 过大 ({format_bytes(file.content_length)})，单个文件最大限制: {format_bytes(config.KNOWLEDGE_BASE_MAX_FILE_BYTES)}'
-                    }), 413
-                incoming_size += file.content_length
-            
-            valid_files.append(file)
-        
-        # 检查总容量限制
-        if current_used + incoming_size > config.KNOWLEDGE_BASE_MAX_BYTES:
-            return jsonify({
-                'success': False,
-                'message': f'存储空间不足。当前使用: {format_bytes(current_used)}, 尝试上传: {format_bytes(incoming_size)}, 总限制: {format_bytes(config.KNOWLEDGE_BASE_MAX_BYTES)}'
-            }), 413
-        
-        # 保存文件
-        saved_files = []
-        for file in valid_files:
-            try:
-                # 清理文件名
-                safe_filename = sanitize_filename(file.filename)
-                
-                # 获取唯一文件名
-                unique_filename = get_unique_filename(config.KNOWLEDGE_BASE_DIR, safe_filename)
-                
-                # 保存文件（流式写入，内存友好）
-                file_path = os.path.join(config.KNOWLEDGE_BASE_DIR, unique_filename)
-                
-                with open(file_path, 'wb') as f:
-                    # 分块写入，避免内存占用过大
-                    while True:
-                        chunk = file.read(8192)  # 8KB chunks
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                
-                # 获取实际文件大小
-                actual_size = os.path.getsize(file_path)
-                
-                # 检查实际文件大小是否超限
-                if actual_size > config.KNOWLEDGE_BASE_MAX_FILE_BYTES:
-                    os.remove(file_path)  # 删除超大文件
-                    return jsonify({
-                        'success': False,
-                        'message': f'文件 {file.filename} 实际大小 ({format_bytes(actual_size)}) 超过限制'
-                    }), 413
-                
-                saved_files.append({
-                    'original_name': file.filename,
-                    'saved_name': unique_filename,
-                    'size': actual_size,
-                    'size_human': format_bytes(actual_size)
-                })
-                
-                print(f"✅ 文件已保存: {unique_filename} ({format_bytes(actual_size)})")
-                
-            except Exception as e:
-                print(f"❌ 保存文件失败 {file.filename}: {e}")
-                return jsonify({
-                    'success': False,
-                    'message': f'保存文件 {file.filename} 失败: {str(e)}'
-                }), 500
-        
-        # 获取更新后的使用情况
-        updated_used = get_folder_size(config.KNOWLEDGE_BASE_DIR)
-        usage_info = {
-            'used_bytes': updated_used,
-            'max_bytes': config.KNOWLEDGE_BASE_MAX_BYTES,
-            'used_human': format_bytes(updated_used),
-            'max_human': format_bytes(config.KNOWLEDGE_BASE_MAX_BYTES),
-            'percent': round((updated_used / config.KNOWLEDGE_BASE_MAX_BYTES) * 100, 1)
-        }
-        
-        return jsonify({
-            'success': True,
-            'message': f'成功上传 {len(saved_files)} 个文件',
-            'files': saved_files,
-            'usage': usage_info
-        })
-        
-    except Exception as e:
-        print(f"❌ 文件上传失败: {e}")
-        return jsonify({
-            'success': False,
-            'message': f'上传失败: {str(e)}'
-        }), 500
-
-@app.route('/status')
-def status():
-    """获取知识库状态"""
-    try:
-        stats = knowledge_manager.get_knowledge_stats()
-        device_info = get_device_info()
-        return jsonify({
-            'success': True,
-            'device_info': device_info,
-            'knowledge_stats': stats
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        })
-
-@app.route('/kb/usage')
-def get_knowledge_base_usage():
-    """获取知识库文件存储使用情况"""
-    try:
-        ensure_knowledge_base_dir()
-        used_bytes = get_folder_size(KNOWLEDGE_BASE_DIR)
-        max_bytes = KNOWLEDGE_BASE_MAX_BYTES
-        percent = (used_bytes / max_bytes * 100) if max_bytes > 0 else 0
-        
-        return jsonify({
-            'used_bytes': used_bytes,
-            'max_bytes': max_bytes,
-            'used_human': format_bytes(used_bytes),
-            'max_human': format_bytes(max_bytes),
-            'percent': round(percent, 1)
-        })
-    except Exception as e:
-        return jsonify({
-            'error': str(e)
-        }), 500
-
-@app.route('/kb/upload', methods=['POST'])
-def upload_knowledge_files():
-    """处理知识库文件上传"""
-    try:
-        ensure_knowledge_base_dir()
-        
-        if 'files' not in request.files:
-            return jsonify({
-                'success': False,
-                'message': '没有选择文件'
-            }), 400
-        
-        files = request.files.getlist('files')
-        if not files or files[0].filename == '':
-            return jsonify({
-                'success': False,
-                'message': '没有选择文件'
-            }), 400
-        
-        # 检查当前存储使用情况
-        current_size = get_folder_size(KNOWLEDGE_BASE_DIR)
-        
-        # 计算所有文件的总大小
-        total_upload_size = 0
-        file_info = []
-        
-        for file in files:
-            if file.filename:
-                # 模拟读取文件大小（不完全加载到内存）
-                file.seek(0, 2)  # 移动到文件末尾
-                file_size = file.tell()
-                file.seek(0)  # 重置到开头
-                
-                file_info.append({
-                    'file': file,
-                    'filename': file.filename,
-                    'size': file_size
-                })
-                total_upload_size += file_size
-        
-        # 检查总容量限制
-        if current_size + total_upload_size > KNOWLEDGE_BASE_MAX_BYTES:
-            return jsonify({
-                'success': False,
-                'message': f'存储容量不足。当前已使用 {format_bytes(current_size)}，尝试上传 {format_bytes(total_upload_size)}，总容量限制 {format_bytes(KNOWLEDGE_BASE_MAX_BYTES)}'
-            }), 413
-        
-        # 处理每个文件
-        results = []
-        saved_files = []
-        
-        for info in file_info:
-            file = info['file']
-            original_filename = info['filename']
-            file_size = info['size']
-            
-            try:
-                # 检查文件大小限制
-                if file_size > KNOWLEDGE_BASE_MAX_FILE_BYTES:
-                    results.append({
-                        'filename': original_filename,
-                        'success': False,
-                        'message': f'文件过大，限制为 {format_bytes(KNOWLEDGE_BASE_MAX_FILE_BYTES)}'
-                    })
-                    continue
-                
-                # 检查文件类型
-                if not is_allowed_file(original_filename):
-                    results.append({
-                        'filename': original_filename,
-                        'success': False,
-                        'message': f'不支持的文件类型，仅支持: {", ".join(ALLOWED_EXTENSIONS)}'
-                    })
-                    continue
-                
-                # 安全化文件名
-                safe_filename = secure_filename(original_filename)
-                if not safe_filename:
-                    safe_filename = f"file_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-                
-                # 生成唯一文件名
-                unique_filename = get_unique_filename(KNOWLEDGE_BASE_DIR, safe_filename)
-                file_path = os.path.join(KNOWLEDGE_BASE_DIR, unique_filename)
-                
-                # 流式保存文件（8KB块，适合低内存设备）
-                with open(file_path, 'wb') as f:
-                    while True:
-                        chunk = file.read(8192)  # 8KB 块
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                
-                saved_files.append(unique_filename)
-                results.append({
-                    'filename': original_filename,
-                    'saved_as': unique_filename,
-                    'success': True,
-                    'size': format_bytes(file_size)
-                })
-                
-            except Exception as e:
-                results.append({
-                    'filename': original_filename,
-                    'success': False,
-                    'message': f'保存失败: {str(e)}'
-                })
-        
-        # 获取更新后的使用情况
-        new_size = get_folder_size(KNOWLEDGE_BASE_DIR)
-        percent = (new_size / KNOWLEDGE_BASE_MAX_BYTES * 100) if KNOWLEDGE_BASE_MAX_BYTES > 0 else 0
-        
-        success_count = sum(1 for r in results if r['success'])
-        total_count = len(results)
-        
-        return jsonify({
-            'success': True,
-            'message': f'成功上传 {success_count}/{total_count} 个文件',
-            'results': results,
-            'usage': {
-                'used_bytes': new_size,
-                'max_bytes': KNOWLEDGE_BASE_MAX_BYTES,
-                'used_human': format_bytes(new_size),
-                'max_human': format_bytes(KNOWLEDGE_BASE_MAX_BYTES),
-                'percent': round(percent, 1)
-            }
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'上传失败: {str(e)}'
-        }), 500
 
 if __name__ == '__main__':
     print("🚀 启动知识库上传服务器...")
