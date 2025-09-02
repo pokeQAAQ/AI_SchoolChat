@@ -415,7 +415,15 @@ UPLOAD_TEMPLATE = """
         }
         
         .file-input {
-            display: none;
+            width: 100%;
+            padding: 15px;
+            border: 2px dashed #4a90e2;
+            border-radius: 8px;
+            background: #f8f9fa;
+            cursor: pointer;
+            transition: border-color 0.3s, background 0.3s;
+            pointer-events: auto;
+            z-index: 1;
         }
         
         .file-input-label {
@@ -466,12 +474,6 @@ UPLOAD_TEMPLATE = """
             font-size: 12px;
         }
         
-        .upload-btn {
-            width: 100%;
-            background: linear-gradient(45deg, #28a745, #20c997);
-            color: white;
-            padding: 12px;
-
         .file-upload-section h2 {
             color: #4a90e2;
             font-size: 20px;
@@ -488,16 +490,6 @@ UPLOAD_TEMPLATE = """
         .file-input-wrapper {
             position: relative;
             margin-bottom: 15px;
-        }
-        
-        .file-input {
-            width: 100%;
-            padding: 15px;
-            border: 2px dashed #ddd;
-            border-radius: 8px;
-            background: #f8f9fa;
-            cursor: pointer;
-            transition: border-color 0.3s, background 0.3s;
         }
         
         .file-input:hover {
@@ -528,27 +520,52 @@ UPLOAD_TEMPLATE = """
             transition: width 0.3s ease;
         }
         
+        .file-select-btn {
+            background: linear-gradient(45deg, #4a90e2, #357abd);
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-bottom: 15px;
+        }
+        
+        .file-select-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(74, 144, 226, 0.4);
+        }
+        
+        .file-select-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+            opacity: 0.6;
+        }
+        
         .upload-btn {
             background: linear-gradient(45deg, #28a745, #20c997);
             color: white;
             padding: 12px 30px;
-
             border: none;
             border-radius: 8px;
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
-
-            transition: all 0.2s;
-
             transition: transform 0.2s, box-shadow 0.2s;
-            margin-right: 10px;
-
+            width: 100%;
         }
         
         .upload-btn:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(40, 167, 69, 0.4);
+        }
+        
+        .upload-btn:active:not(:disabled) {
+            transform: translateY(0);
         }
         
         .upload-btn:disabled {
@@ -586,10 +603,6 @@ UPLOAD_TEMPLATE = """
             font-size: 13px;
         }
         
-
-        .upload-btn:active:not(:disabled) {
-            transform: translateY(0);
-
         .file-list {
             margin-top: 10px;
             font-size: 14px;
@@ -599,7 +612,6 @@ UPLOAD_TEMPLATE = """
         .file-list .file-item {
             padding: 5px 0;
             border-bottom: 1px solid #eee;
-
         }
     </style>
 </head>
@@ -677,6 +689,7 @@ UPLOAD_TEMPLATE = """
                 
                 <form id="fileUploadForm" enctype="multipart/form-data">
                     <div class="file-input-wrapper">
+                        <button type="button" id="fileSelectBtn" class="file-select-btn">📂 选择文件</button>
                         <input type="file" id="fileInput" name="files" multiple 
                                accept=".pdf,.doc,.docx,.md,.markdown,.txt"
                                class="file-input">
@@ -770,8 +783,10 @@ UPLOAD_TEMPLATE = """
             
             // 启用控件，允许用户尝试上传
             const fileInput = document.getElementById('fileInput');
+            const fileSelectBtn = document.getElementById('fileSelectBtn');
             const uploadBtn = document.getElementById('uploadBtn');
             fileInput.disabled = false;
+            fileSelectBtn.disabled = false;
             uploadBtn.disabled = fileInput.files.length === 0;
             if (fileInput.files.length > 0) {
                 uploadBtn.textContent = '📤 上传文件';
@@ -791,6 +806,7 @@ UPLOAD_TEMPLATE = """
         function updateUploadControls() {
             const uploadBtn = document.getElementById('uploadBtn');
             const fileInput = document.getElementById('fileInput');
+            const fileSelectBtn = document.getElementById('fileSelectBtn');
             const capacityMsg = document.getElementById('capacity-message');
             const warningDiv = document.getElementById('usage-warning');
             
@@ -803,6 +819,7 @@ UPLOAD_TEMPLATE = """
             if (isFull) {
                 // 容量已满：禁用控件但保持可见，显示说明消息
                 fileInput.disabled = true;
+                fileSelectBtn.disabled = true;
                 uploadBtn.disabled = true;
                 uploadBtn.textContent = '🚫 存储空间已满';
                 capacityMsg.textContent = '容量已满，无法上传。请删除部分文件后重试。';
@@ -810,6 +827,7 @@ UPLOAD_TEMPLATE = """
             } else {
                 // 容量未满：启用控件
                 fileInput.disabled = false;
+                fileSelectBtn.disabled = false;
                 capacityMsg.style.display = 'none';
                 
                 if (fileInput.files.length === 0) {
@@ -843,6 +861,15 @@ UPLOAD_TEMPLATE = """
             
             fileList.innerHTML = html;
             updateUploadControls();
+        });
+        
+        // 文件选择按钮事件
+        document.getElementById('fileSelectBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            const fileInput = document.getElementById('fileInput');
+            if (!fileInput.disabled) {
+                fileInput.click();
+            }
         });
         
         // 文件上传表单提交
@@ -1061,6 +1088,102 @@ def kb_usage():
         return jsonify({
             'success': False,
             'message': f'获取使用情况失败: {str(e)}'
+        })
+
+@app.route('/kb/upload', methods=['POST'])
+def kb_upload():
+    """处理知识库文件上传"""
+    try:
+        if 'files' not in request.files:
+            return jsonify({
+                'success': False,
+                'message': '没有选择文件'
+            })
+        
+        files = request.files.getlist('files')
+        if not files or all(f.filename == '' for f in files):
+            return jsonify({
+                'success': False,
+                'message': '没有选择文件'
+            })
+        
+        # 检查存储容量
+        current_usage = get_folder_size(config.KNOWLEDGE_BASE_DIR)
+        if current_usage >= config.KNOWLEDGE_BASE_MAX_BYTES:
+            return jsonify({
+                'success': False,
+                'message': '存储空间已满，无法上传'
+            })
+        
+        uploaded_files = []
+        total_size = 0
+        
+        for file in files:
+            if file.filename == '':
+                continue
+                
+            if not is_allowed_file(file.filename):
+                return jsonify({
+                    'success': False,
+                    'message': f'不支持的文件类型: {file.filename}'
+                })
+            
+            # 检查文件大小
+            file.seek(0, 2)  # 移动到文件末尾
+            file_size = file.tell()
+            file.seek(0)  # 重置到文件开头
+            
+            if file_size > config.KNOWLEDGE_BASE_MAX_FILE_BYTES:
+                return jsonify({
+                    'success': False,
+                    'message': f'文件太大: {file.filename} ({format_bytes(file_size)})'
+                })
+            
+            # 检查总容量
+            if current_usage + total_size + file_size > config.KNOWLEDGE_BASE_MAX_BYTES:
+                return jsonify({
+                    'success': False,
+                    'message': '上传文件将超出存储容量限制'
+                })
+            
+            total_size += file_size
+        
+        # 保存文件
+        for file in files:
+            if file.filename == '':
+                continue
+                
+            safe_filename = sanitize_filename(file.filename)
+            unique_filename = get_unique_filename(config.KNOWLEDGE_BASE_DIR, safe_filename)
+            file_path = os.path.join(config.KNOWLEDGE_BASE_DIR, unique_filename)
+            
+            file.save(file_path)
+            uploaded_files.append(unique_filename)
+        
+        # 获取更新后的使用情况
+        new_usage = get_folder_size(config.KNOWLEDGE_BASE_DIR)
+        max_bytes = config.KNOWLEDGE_BASE_MAX_BYTES
+        used_human = format_bytes(new_usage)
+        max_human = format_bytes(max_bytes)
+        percent = min(100, (new_usage / max_bytes) * 100) if max_bytes > 0 else 0
+        
+        return jsonify({
+            'success': True,
+            'message': f'成功上传 {len(uploaded_files)} 个文件',
+            'files': uploaded_files,
+            'usage': {
+                'used_bytes': new_usage,
+                'max_bytes': max_bytes,
+                'used_human': used_human,
+                'max_human': max_human,
+                'percent': round(percent, 1)
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'上传失败: {str(e)}'
         })
 
 if __name__ == '__main__':
