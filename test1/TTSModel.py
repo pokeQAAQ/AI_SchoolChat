@@ -46,7 +46,7 @@ class TTSModel(QThread):
             print(f"[TTS] {msg.encode('utf-8', errors='replace').decode('utf-8')}")
 
     def _clean_text(self, text):
-        """清理输入文本"""
+        """清理输入文本 - 不再限制长度，支持完整文本"""
         if not isinstance(text, str):
             try:
                 text = str(text)
@@ -56,15 +56,10 @@ class TTSModel(QThread):
         # 移除控制字符，保留标点
         cleaned = ''.join([c for c in text if c.isprintable() or c in '\n\t,.!?;，。！？；'])
 
-        # 限制长度
-        MAX_TTS_LENGTH = 300
-        if len(cleaned) > MAX_TTS_LENGTH:
-            cleaned = cleaned[:MAX_TTS_LENGTH] + "..."
-
         return cleaned
 
     def run(self):
-        """执行TTS合成"""
+        """执行TTS合成 - 支持长文本分块合成"""
         try:
             with QMutexLocker(self.mutex):
                 if self._stop_requested:
@@ -75,9 +70,20 @@ class TTSModel(QThread):
                 self.finished.emit("错误：空文本无法转换语音", self.original_text)
                 return
 
-            # 合成音频（带重试）
-            result = self._synthesize_with_retry()
+            # 如果文本较短，直接合成
+            MAX_CHUNK_SIZE = 280  # 稍小于API限制，为标点符号留空间
+            if len(self.text) <= MAX_CHUNK_SIZE:
+                result = self._synthesize_with_retry()
+                if result and os.path.exists(result) and os.path.getsize(result) > 0:
+                    self.finished.emit(result, self.original_text)
+                else:
+                    self.finished.emit("TTS合成失败或音频文件为空", self.original_text)
+                return
 
+            # 长文本分块合成
+            self._debug(f"长文本分块合成 - 文本长度: {len(self.text)} 字符")
+            result = self._synthesize_chunked()
+            
             if result and os.path.exists(result) and os.path.getsize(result) > 0:
                 self.finished.emit(result, self.original_text)
             else:
@@ -105,6 +111,107 @@ class TTSModel(QThread):
                     time.sleep(self.retry_delay)
 
         return None
+
+    def _synthesize_chunked(self):
+        """分块合成长文本"""
+        MAX_CHUNK_SIZE = 280
+        chunks = self._split_text_into_chunks(self.text, MAX_CHUNK_SIZE)
+        self._debug(f"文本分为 {len(chunks)} 块")
+        
+        audio_chunks = []
+        for i, chunk in enumerate(chunks):
+            with QMutexLocker(self.mutex):
+                if self._stop_requested:
+                    return None
+                    
+            self._debug(f"合成第 {i+1}/{len(chunks)} 块")
+            
+            # 临时保存当前文本，替换为块文本
+            original_text = self.text
+            self.text = chunk
+            
+            try:
+                chunk_audio = self._synthesize_with_retry()
+                if chunk_audio and os.path.exists(chunk_audio):
+                    # 读取音频数据
+                    with open(chunk_audio, 'rb') as f:
+                        audio_chunks.append(f.read())
+                    self._debug(f"第 {i+1} 块合成完成，大小: {len(audio_chunks[-1])} bytes")
+                else:
+                    self._debug(f"第 {i+1} 块合成失败")
+                    return None
+            finally:
+                # 恢复原始文本
+                self.text = original_text
+        
+        # 合并音频块
+        if audio_chunks:
+            combined_audio = b''.join(audio_chunks)
+            temp_path = f"{self.output_path}.tmp"
+            with open(temp_path, 'wb') as f:
+                f.write(combined_audio)
+            
+            # 原子性替换
+            if os.path.exists(self.output_path):
+                os.remove(self.output_path)
+            os.rename(temp_path, self.output_path)
+            
+            self._debug(f"合并完成，总大小: {len(combined_audio)} bytes")
+            return self.output_path
+        
+        return None
+
+    def _split_text_into_chunks(self, text, max_size):
+        """智能分割文本为合适的块"""
+        if len(text) <= max_size:
+            return [text]
+        
+        chunks = []
+        current_chunk = ""
+        
+        # 按句子分割（优先级：。！？；.!?;）
+        sentences = []
+        current_sentence = ""
+        
+        for char in text:
+            current_sentence += char
+            if char in '。！？；.!?;':
+                sentences.append(current_sentence)
+                current_sentence = ""
+        
+        # 处理最后一个句子（如果没有结束符）
+        if current_sentence:
+            sentences.append(current_sentence)
+        
+        for sentence in sentences:
+            # 如果单个句子就超过最大长度，需要强制分割
+            if len(sentence) > max_size:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                    current_chunk = ""
+                
+                # 强制按字符分割超长句子
+                while len(sentence) > max_size:
+                    chunks.append(sentence[:max_size])
+                    sentence = sentence[max_size:]
+                
+                if sentence:
+                    current_chunk = sentence
+            
+            # 检查是否能添加到当前块
+            elif len(current_chunk) + len(sentence) <= max_size:
+                current_chunk += sentence
+            else:
+                # 当前块已满，开始新块
+                if current_chunk:
+                    chunks.append(current_chunk)
+                current_chunk = sentence
+        
+        # 添加最后一块
+        if current_chunk:
+            chunks.append(current_chunk)
+        
+        return chunks
 
     def _synthesize_audio(self):
         """使用火山引擎HTTP接口合成音频"""

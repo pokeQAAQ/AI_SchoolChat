@@ -1,8 +1,14 @@
 # main_window.py (修改后)
+"""
+AI SchoolChat 主窗口模块
+
+系统要求:
+- alsa-utils 用于音频播放 (pacman -S alsa-utils)
+- 已移除PyAudio依赖，使用arecord/aplay避免ALSA/JACK错误
+"""
 import sys
 import os
 import time
-import pyaudio
 from PySide6.QtCore import Qt, QTimer, QMutex, QSize
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidget,
                               QProgressBar, QFrame, QLabel, QPushButton,
@@ -10,9 +16,12 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidget,
                               QListWidgetItem)  # 添加这一行！
 from PySide6.QtGui import QFont, QCursor
 
-# 导入自定义组件和线程
+# 配置标志
+USE_PLAYBACK = True  # 启用/禁用音频播放
+APLAY_DEVICE = None  # 播放设备，例如 "hw:0,0" 或 None 使用默认设备
 
-from audio_threads import AudioPlayThread
+# 导入自定义组件和线程
+from AplayPlayThread import AplayPlayThread
 from test1 import ChatBubble, RecordButton
 
 
@@ -21,6 +30,18 @@ from RecordThread import RecordThread
 from AiIOPut import AiIOPut
 from AiReply import AiReply
 from TTSModel import TTSModel
+
+
+# 替换PyAudio设备检测函数为无操作函数，避免ALSA/JACK错误
+def check_device():
+    """无操作设备检查函数"""
+    print("🔊 使用alsa-utils进行音频播放，跳过PyAudio设备检查")
+    return True
+
+def get_device_index_by_name(device_name):
+    """无操作设备索引获取函数"""
+    print(f"🔊 设备 '{device_name}' 将使用默认alsa设备")
+    return None
 class ChatWindow(QWidget):
     """聊天主窗口"""
     def __init__(self, api_key, base_url):
@@ -404,13 +425,6 @@ class ChatWindow(QWidget):
             print("❌ AI回复为空")
             return
 
-        # 新增：TTS接口字符限制处理（假设最大支持300字符，需根据实际文档调整）
-        MAX_TTS_LENGTH = 300  # 替换为TTS接口实际限制的字符数
-        if isinstance(ai_text, str):
-            if len(ai_text) > MAX_TTS_LENGTH:
-                ai_text = ai_text[:MAX_TTS_LENGTH] + "..."  # 截断并添加省略号
-                print(f"⚠️ TTS文本过长，已截断至{MAX_TTS_LENGTH}字符")
-
         if "LLM失败" in ai_text or "LLM错误" in ai_text:
             self.add_system_message(f"❌ AI错误：{ai_text}")
             print(f"❌ AI错误：{ai_text}")
@@ -427,11 +441,11 @@ class ChatWindow(QWidget):
         self.conversation_history.append({"role": "assistant", "content": ai_text})
         print("🔊 正在生成语音...")
 
-        self.tts_thread = TTSModel(self.api_key, self.base_url, ai_text)
+        self.tts_thread = TTSModel(ai_text)  # 更新构造函数，移除api_key和base_url
         self.thread_mutex.lock()
         self.active_threads.append(self.tts_thread)
         self.thread_mutex.unlock()
-        self.tts_thread.finished.connect(self.on_tts_finished)
+        self.tts_thread.finished.connect(lambda path, text: self.on_tts_finished(path))  # 适配新的信号签名
         self.tts_thread.start()
 
     def on_audio_play_finished(self):
@@ -466,25 +480,24 @@ class ChatWindow(QWidget):
         self.current_play_thread = None
 
         print("▶️ 正在播放回答...")
-        self.play_thread = AudioPlayThread(audio_path)
+        
+        # 检查是否启用播放
+        if not USE_PLAYBACK:
+            print("🔇 音频播放已禁用")
+            return
+            
+        self.play_thread = AplayPlayThread(audio_path, device=APLAY_DEVICE)
         self.thread_mutex.lock()
         self.active_threads.append(self.play_thread)
         self.thread_mutex.unlock()
         self.play_thread.finished_signal.connect(self.on_audio_play_finished)
+        self.play_thread.stopped_signal.connect(self.on_audio_play_finished)  # 处理停止信号
         self.current_play_thread = self.play_thread
         self.play_thread.start()
 
     def get_device_index_by_name(self, target_name):
-        audio = pyaudio.PyAudio()
-        try:
-            for i in range(audio.get_device_count()):
-                device_info = audio.get_device_info_by_index(i)
-                if target_name.lower() in device_info["name"].lower() and device_info["maxInputChannels"] > 0:
-                    return i
-        except Exception as e:
-            print(f"获取设备列表失败: {str(e)}")
-        finally:
-            audio.terminate()
+        """无操作设备索引获取函数 - 避免PyAudio依赖"""
+        print(f"🔊 设备 '{target_name}' 将使用默认alsa设备")
         return None
 
     def print_to_terminal(self, text):

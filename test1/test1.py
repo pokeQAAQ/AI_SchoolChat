@@ -1,6 +1,12 @@
+"""
+AI SchoolChat - 智能校园聊天助手
+
+系统要求:
+- alsa-utils 用于音频播放 (pacman -S alsa-utils)
+- 已移除PyAudio依赖，使用arecord/aplay避免ALSA/JACK错误
+"""
 import sys
 import wave
-import pyaudio
 import os
 import time
 import hashlib
@@ -22,14 +28,31 @@ import io
 import socket
 import subprocess
 
+# 配置标志
+USE_PLAYBACK = True  # 启用/禁用音频播放
+APLAY_DEVICE = None  # 播放设备，例如 "hw:0,0" 或 None 使用默认设备
+
 # 导入自定义模块
 from RecordThread import RecordThread
 from PersistentRecordManager import PersistentRecordManager
 from AiIOPut import AiIOPut
 from AiReply import AiReply
 from TTSModel import TTSModel
+from AplayPlayThread import AplayPlayThread
 from smooth_scroll_list import SmoothScrollList
 from knowledge_manager import knowledge_manager
+
+
+# 替换PyAudio设备检测函数为无操作函数，避免ALSA/JACK错误
+def check_device():
+    """无操作设备检查函数"""
+    print("🔊 使用alsa-utils进行音频播放，跳过PyAudio设备检查")
+    return True
+
+def get_device_index_by_name(device_name):
+    """无操作设备索引获取函数"""
+    print(f"🔊 设备 '{device_name}' 将使用默认alsa设备")
+    return None
 
 
 # 配置常量
@@ -465,129 +488,6 @@ class RecordButton(QPushButton):
             self.released_signal.emit()
         super().mouseMoveEvent(event)
 
-
-class AudioPlayThread(QThread):
-    """基于PyAudio的PCM音频播放线程"""
-    finished_signal = Signal()
-    stopped_signal = Signal()
-
-    def __init__(self, audio_path, sample_rate=16000, channels=1, bit_depth=16):
-        super().__init__()
-        self.audio_path = audio_path
-        self.sample_rate = sample_rate
-        self.channels = channels
-        self.bit_depth = bit_depth
-        self._stop_flag = False
-        self._p = None
-        self._stream = None
-        self._lock = QMutex()
-        self._is_playing = False
-
-    def run(self):
-        """安全播放PCM音频"""
-        try:
-            # 验证文件安全性
-            if not SecurityManager.validate_file_path(self.audio_path, ['.pcm', '.raw']):
-                raise FileNotFoundError(f"无效的音频文件: {self.audio_path}")
-
-            self._lock.lock()
-            self._is_playing = True
-            self._lock.unlock()
-
-            with open(self.audio_path, 'rb') as f:
-                self._p = pyaudio.PyAudio()
-
-                format = pyaudio.paInt16 if self.bit_depth == 16 else pyaudio.paInt32
-
-                # 针对香橙派优化的音频参数
-                self._stream = self._p.open(
-                    format=format,
-                    channels=self.channels,
-                    rate=self.sample_rate,
-                    output=True,
-                    frames_per_buffer=Config.AUDIO_CHUNK_SIZE
-                )
-
-                # 使用更小的块大小，减少延迟
-                chunk_size = Config.AUDIO_CHUNK_SIZE
-                data = f.read(chunk_size)
-
-                self._lock.lock()
-                stop_requested = self._stop_flag
-                self._lock.unlock()
-
-                while data and not stop_requested:
-                    self._lock.lock()
-                    stop_requested = self._stop_flag
-                    self._lock.unlock()
-
-                    if stop_requested:
-                        break
-
-                    if self._stream and self._stream.is_active():
-                        try:
-                            self._stream.write(data)
-                        except Exception as e:
-                            error_msg = str(e).lower()
-                            if "stream stopped" in error_msg or "invalid stream" in error_msg:
-                                print(f"播放流已停止: {str(e)}")
-                            else:
-                                print(f"播放写入错误: {str(e)}")
-                            break
-                    data = f.read(chunk_size)
-
-                self._lock.lock()
-                if not self._stop_flag:
-                    self.finished_signal.emit()
-                self._lock.unlock()
-
-        except Exception as e:
-            print(f"播放错误: {str(e)}")
-        finally:
-            self._cleanup()
-            self._lock.lock()
-            if self._stop_flag:
-                self.stopped_signal.emit()
-            self._lock.unlock()
-
-    def stop(self):
-        """安全停止播放"""
-        self._lock.lock()
-        if not self._stop_flag:
-            self._stop_flag = True
-        self._lock.unlock()
-
-        self.wait(100)
-
-        if self.isRunning():
-            self._cleanup()
-
-    def _cleanup(self):
-        """资源清理"""
-        self._lock.lock()
-        try:
-            if self._stream:
-                try:
-                    if self._stream.is_active():
-                        self._stream.stop_stream()
-                    self._stream.close()
-                except Exception as e:
-                    print(f"关闭流错误: {e}")
-                finally:
-                    self._stream = None
-
-            if self._p:
-                try:
-                    self._p.terminate()
-                except Exception as e:
-                    print(f"终止PyAudio错误: {e}")
-                finally:
-                    self._p = None
-
-            self._is_playing = False
-
-        finally:
-            self._lock.unlock()
 
 
 class ChatWindow(QWidget):
@@ -1032,7 +932,7 @@ class ChatWindow(QWidget):
         self.thread_mutex.lock()
         try:
             # 优先停止音频相关线程
-            audio_threads = [t for t in self.active_threads if isinstance(t, (AudioPlayThread, RecordThread))]
+            audio_threads = [t for t in self.active_threads if isinstance(t, (AplayPlayThread, RecordThread))]
             for thread in audio_threads:
                 if hasattr(thread, "stop"):
                     thread.stop()
@@ -1347,7 +1247,7 @@ class ChatWindow(QWidget):
                     str(ai_text)
                 )
 
-        safe_ai_text = SecurityManager.sanitize_text(str(ai_text), 1000)
+        safe_ai_text = SecurityManager.sanitize_text(str(ai_text))  # 移除长度限制，保持完整显示
         # 不在这里显示气泡，等待TTS完成
         self.conversation_history.append({"role": "assistant", "content": safe_ai_text})
         print("🔊 正在生成语音...")
@@ -1385,26 +1285,26 @@ class ChatWindow(QWidget):
             return
 
         try:
-            # 1. 先显示AI回答气泡
+            # 1. 先显示AI回答气泡（完整文本，无截断）
             self.add_ai_message(ai_text)
 
-            # 2. 验证音频文件安全性
-            if not SecurityManager.validate_file_path(audio_path, ['.pcm', '.raw']):
+            # 2. 检查是否启用播放
+            if not USE_PLAYBACK:
+                print("🔇 音频播放已禁用")
+                return
+
+            # 3. 验证音频文件安全性
+            if not SecurityManager.validate_file_path(audio_path, ['.pcm', '.raw', '.wav']):
                 raise FileNotFoundError(f"无效的音频文件: {audio_path}")
 
-            # 3. 确保之前的播放已完全停止
+            # 4. 确保之前的播放已完全停止
             self.stop_current_audio()
 
-            if os.path.getsize(audio_path) == 0:
-                raise ValueError(f"音频文件为空: {audio_path}")
+            if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
+                raise ValueError(f"音频文件为空或不存在: {audio_path}")
 
-            # 4. 启动PCM播放线程
-            self.play_thread = AudioPlayThread(
-                audio_path,
-                sample_rate=16000,
-                channels=1,
-                bit_depth=16
-            )
+            # 5. 启动aplay播放线程
+            self.play_thread = AplayPlayThread(audio_path, device=APLAY_DEVICE)
             self.thread_mutex.lock()
             self.active_threads.append(self.play_thread)
             self.thread_mutex.unlock()
@@ -1413,6 +1313,11 @@ class ChatWindow(QWidget):
             self.play_thread.stopped_signal.connect(self.on_audio_stopped)
             self.current_play_thread = self.play_thread
             self.play_thread.start()
+
+        except Exception as e:
+            error_msg = SecurityManager.sanitize_text(str(e))
+            self.add_system_message(f"❌ 播放准备失败：{error_msg}")
+            print(f"播放准备错误: {error_msg}")
 
         except Exception as e:
             error_msg = SecurityManager.sanitize_text(str(e))
