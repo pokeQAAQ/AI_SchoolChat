@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📚 校园智能小助手 - 知识上传</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/upload.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📚 校园智能小助手</h1>
+            <p>上传学校知识，让AI更懂您的校园</p>
+            <div class="device-info">
+                <div>📡 设备: {{ device_info.hostname }}</div>
+                <div>🌐 IP: {{ device_info.ip }}</div>
+                <div>🔗 MAC: {{ device_info.mac }}</div>
+            </div>
+        </div>
+        
+        <div class="form-container">
+            <div class="tips">
+                <h3>📝 上传说明</h3>
+                <ul>
+                    <li>请填写您学校的相关信息，帮助AI更好地回答校园问题</li>
+                    <li>可以只填写部分内容，不必全部填写</li>
+                    <li>内容会保存在本地，不会上传到外网</li>
+                    <li>支持中文内容，请尽量详细描述</li>
+                </ul>
+            </div>
+            
+            <form id="uploadForm" method="POST" action="/upload">
+                <div class="form-group">
+                    <label for="school_info">🏫 学校简介</label>
+                    <textarea 
+                        id="school_info" 
+                        name="school_info" 
+                        rows="6" 
+                        placeholder="请介绍您的学校，例如：学校名称、建校时间、办学特色、专业设置、校园环境等...">{{ form_data.get('school_info', '') }}</textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="history">📜 校史沿革</label>
+                    <textarea 
+                        id="history" 
+                        name="history" 
+                        rows="6" 
+                        placeholder="请介绍学校的历史发展，例如：重要历史节点、发展历程、重大事件、历史变迁等...">{{ form_data.get('history', '') }}</textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="celebrities" class="section-label">🌟 知名校友</label>
+                    <div class="section-description">添加学校的知名校友或者教师信息</div>
+                    
+                    <div id="celebrities-container">
+                        <!-- 校友条目将动态添加到这里 -->
+                    </div>
+                    
+                    <div class="celebrity-controls">
+                        <button type="button" id="add-celebrity-btn" class="add-btn">
+                            <span class="add-icon">➕</span> 添加校友
+                        </button>
+                    </div>
+                    
+                    <!-- 隐藏字段，用于存储所有校友数据的JSON -->
+                    <input type="hidden" id="celebrities" name="celebrities" value="{{ form_data.get('celebrities', '') }}">
+                </div>
+                
+                <button type="submit" class="submit-btn">🚀 上传知识</button>
+            </form>
+            
+            <div id="status" class="status"></div>
+            
+
+            <!-- 文件上传部分 -->
+            <div class="file-upload-section">
+                <h2>📁 上传本地知识库</h2>
+                <div class="subtext">
+                    支持 .pdf .doc .docx .md .markdown .txt。
+                </div>
+                
+                <div class="usage-info">
+                    <div id="usage-text">正在加载使用情况...</div>
+                    <div class="usage-bar">
+                        <div id="usage-progress" class="usage-progress" style="width: 0%"></div>
+                    </div>
+                    <div id="usage-warning" class="usage-warning" style="display: none;"></div>
+                </div>
+                
+                <form id="fileUploadForm" enctype="multipart/form-data">
+                    <div class="file-input-wrapper">
+                        <label for="fileInput" class="file-input-label">
+                            📂 点击选择文件（支持多选）
+                        </label>
+                        <input type="file" id="fileInput" name="files" multiple 
+                               accept=".pdf,.doc,.docx,.md,.markdown,.txt"
+                               class="file-input">
+                    </div>
+                    
+                    <div id="file-list" class="file-list"></div>
+                    
+                    <button type="submit" id="uploadBtn" class="upload-btn">📤 上传文件</button>
+                    
+                    <div id="capacity-message" class="capacity-message" style="display: none;"></div>
+                </form>
+                
+                <div id="file-status" class="status"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='js/upload.js') }}"></script>
+</body>
+</html>

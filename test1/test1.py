@@ -244,7 +244,7 @@ class KnowledgeQRDialog(QDialog):
         layout.setSpacing(20)
         
         # 标题
-        title = QLabel("📱 扫码上传知识")
+        title = QLabel("扫码上传知识")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("""
             font-size: 24px;
@@ -255,7 +255,7 @@ class KnowledgeQRDialog(QDialog):
         layout.addWidget(title)
         
         # 说明文字
-        instruction = QLabel("📱 手机连接设备热点，然后扫码访问下面的网址：")
+        instruction = QLabel(" 手机连接设备热点，然后扫码访问下面的网址：")
         instruction.setWordWrap(True)
         instruction.setAlignment(Qt.AlignCenter)
         instruction.setStyleSheet("font-size: 16px; color: #34495e; margin: 10px;")
@@ -317,7 +317,7 @@ class KnowledgeQRDialog(QDialog):
             device_info = self.get_device_info()
             
             # 生成访问网址
-            access_url = f"http://{device_info['ip']}:8080/upload"
+            access_url = f"http://{device_info['ip']}:8080"
             
             # 生成二维码
             qr_pixmap = QRCodeGenerator.create_qr_pixmap(access_url, 180)

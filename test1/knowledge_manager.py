@@ -10,6 +10,7 @@ import time
 import re
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
+import threading
 
 
 class LocalKnowledgeManager:
@@ -17,6 +18,7 @@ class LocalKnowledgeManager:
     
     def __init__(self, db_path="/home/orangepi/program/LTChat_updater/app/test1/knowledge.db"):
         self.db_path = db_path
+        self.lock = threading.Lock()  # 添加线程锁
         self.init_database()
         
         # 问题类型关键词映射
@@ -31,81 +33,114 @@ class LocalKnowledgeManager:
         try:
             os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
             
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # 创建知识表
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS knowledge (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    category TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    keywords TEXT,
-                    device_id TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    relevance_score REAL DEFAULT 1.0
-                )
-            ''')
-            
-            # 创建索引优化搜索
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_keywords ON knowledge(keywords)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_category ON knowledge(category)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_content ON knowledge(content)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_relevance ON knowledge(relevance_score)')
-            
-            conn.commit()
-            conn.close()
+            # 使用锁保护数据库初始化
+            with self.lock:
+                conn = sqlite3.connect(self.db_path, timeout=20.0)
+                cursor = conn.cursor()
+                
+                # 创建知识表
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS knowledge (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        category TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        keywords TEXT,
+                        device_id TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        relevance_score REAL DEFAULT 1.0
+                    )
+                ''')
+                
+                # 创建索引优化搜索
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_keywords ON knowledge(keywords)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_category ON knowledge(category)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_content ON knowledge(content)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_relevance ON knowledge(relevance_score)')
+                
+                conn.commit()
+                conn.close()
             print("✅ 知识库数据库初始化成功")
             
         except Exception as e:
             print(f"❌ 知识库初始化失败: {e}")
     
+    def _get_db_connection(self, timeout=20.0):
+        """获取数据库连接，带重试机制"""
+        max_retries = 5
+        retry_delay = 0.5
+        
+        for attempt in range(max_retries):
+            try:
+                conn = sqlite3.connect(self.db_path, timeout=timeout)
+                conn.execute('PRAGMA journal_mode=WAL')  # 启用WAL模式提高并发性能
+                return conn
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < max_retries - 1:
+                    print(f"⚠️ 数据库被锁定，{retry_delay}秒后重试 ({attempt + 1}/{max_retries})")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避
+                else:
+                    raise e
+        return None
+    
     def add_knowledge(self, school_info="", history="", celebrities="", device_id=""):
         """添加知识到本地库"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            knowledge_items = []
-            if school_info.strip():
-                keywords = self._extract_keywords_enhanced(school_info)
-                knowledge_items.append(("school_info", school_info, keywords))
-            if history.strip():
-                keywords = self._extract_keywords_enhanced(history)
-                knowledge_items.append(("history", history, keywords))
-            if celebrities.strip():
-                keywords = self._extract_keywords_enhanced(celebrities)
-                knowledge_items.append(("celebrities", celebrities, keywords))
-            
-            for category, content, keywords in knowledge_items:
-                cursor.execute('''
-                    SELECT id FROM knowledge 
-                    WHERE category = ? AND device_id = ?
-                ''', (category, device_id))
+            # 使用锁保护写操作
+            with self.lock:
+                conn = self._get_db_connection()
+                if not conn:
+                    raise Exception("无法获取数据库连接")
                 
-                existing = cursor.fetchone()
+                cursor = conn.cursor()
                 
-                if existing:
-                    cursor.execute('''
-                        UPDATE knowledge 
-                        SET content = ?, keywords = ?, updated_at = ?, relevance_score = ?
-                        WHERE id = ?
-                    ''', (content, keywords, datetime.now(), 1.0, existing[0]))
-                    print(f"📝 更新知识: {category}")
+                knowledge_items = []
+                if school_info.strip():
+                    keywords = self._extract_keywords_enhanced(school_info)
+                    knowledge_items.append(("school_info", school_info, keywords))
+                    print(f"添加学校信息: {school_info[:50]}...")  # 调试信息
+                if history.strip():
+                    keywords = self._extract_keywords_enhanced(history)
+                    knowledge_items.append(("history", history, keywords))
+                    print(f"添加历史信息: {history[:50]}...")  # 调试信息
+                if celebrities.strip():
+                    keywords = self._extract_keywords_enhanced(celebrities)
+                    knowledge_items.append(("celebrities", celebrities, keywords))
+                    print(f"添加校友信息: {celebrities[:50]}...")  # 调试信息
                 else:
+                    print(f"校友信息为空或只有空格: '{celebrities}'")  # 调试信息
+                
+                print(f"总共要添加的知识项数: {len(knowledge_items)}")  # 调试信息
+                
+                for category, content, keywords in knowledge_items:
                     cursor.execute('''
-                        INSERT INTO knowledge 
-                        (category, content, keywords, device_id, created_at, updated_at, relevance_score) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ''', (category, content, keywords, device_id, datetime.now(), datetime.now(), 1.0))
-                    print(f"➕ 新增知识: {category}")
-            
-            conn.commit()
-            conn.close()
-            
-            return len(knowledge_items) > 0
-            
+                        SELECT id FROM knowledge 
+                        WHERE category = ? AND device_id = ?
+                    ''', (category, device_id))
+                    
+                    existing = cursor.fetchone()
+                    
+                    if existing:
+                        cursor.execute('''
+                            UPDATE knowledge 
+                            SET content = ?, keywords = ?, updated_at = ?, relevance_score = ?
+                            WHERE id = ?
+                        ''', (content, keywords, datetime.now(), 1.0, existing[0]))
+                        print(f"📝 更新知识: {category}")
+                    else:
+                        cursor.execute('''
+                            INSERT INTO knowledge 
+                            (category, content, keywords, device_id, created_at, updated_at, relevance_score) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ''', (category, content, keywords, device_id, datetime.now(), datetime.now(), 1.0))
+                        print(f"➕ 新增知识: {category}")
+                
+                conn.commit()
+                conn.close()
+                
+                return len(knowledge_items) > 0
+                
         except Exception as e:
             print(f"❌ 添加知识失败: {e}")
             return False
@@ -152,7 +187,10 @@ class LocalKnowledgeManager:
             if not detected_types:
                 return []
             
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_db_connection()
+            if not conn:
+                return []
+            
             cursor = conn.cursor()
             
             # 获取对应类型的所有知识
@@ -179,7 +217,10 @@ class LocalKnowledgeManager:
         try:
             query_lower = query.lower()
             
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_db_connection()
+            if not conn:
+                return []
+            
             cursor = conn.cursor()
             
             cursor.execute('''
@@ -206,7 +247,10 @@ class LocalKnowledgeManager:
             if not query_keywords:
                 return []
             
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_db_connection()
+            if not conn:
+                return []
+            
             cursor = conn.cursor()
             
             cursor.execute('SELECT category, content, keywords FROM knowledge')
@@ -257,7 +301,10 @@ class LocalKnowledgeManager:
     def get_all_knowledge_by_categories(self):
         """按分类获取所有知识"""
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_db_connection()
+            if not conn:
+                return {}
+            
             cursor = conn.cursor()
             
             cursor.execute('''
@@ -284,7 +331,10 @@ class LocalKnowledgeManager:
     def get_knowledge_stats(self):
         """获取知识库统计信息"""
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_db_connection()
+            if not conn:
+                return {"total": 0}
+            
             cursor = conn.cursor()
             
             cursor.execute('''
@@ -311,11 +361,16 @@ class LocalKnowledgeManager:
     def clear_knowledge(self):
         """清空知识库"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM knowledge')
-            conn.commit()
-            conn.close()
+            # 使用锁保护写操作
+            with self.lock:
+                conn = self._get_db_connection()
+                if not conn:
+                    raise Exception("无法获取数据库连接")
+                
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM knowledge')
+                conn.commit()
+                conn.close()
             print("🗑️ 知识库已清空")
             return True
         except Exception as e:
