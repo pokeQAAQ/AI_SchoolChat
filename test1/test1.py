@@ -1671,10 +1671,8 @@ if __name__ == '__main__':
     # 环境配置
     os.environ['QT_QPA_PLATFORM'] = 'xcb'
     os.environ['QT_FONT_DPI'] = '96'
-    os.environ['ALSA_PCM_PLUGIN'] = 'default'
 
     # 针对香橙派的优化设置
-    os.environ['PA_ALSA_PLUGHW'] = '1'
     os.environ['PA_STREAM_LATENCY'] = '60,60'
     os.environ['QT_QUICK_FLICKABLE_WHEEL_DECELERATION'] = '5000'
 
