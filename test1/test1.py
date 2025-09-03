@@ -1,6 +1,5 @@
 import sys
 import wave
-import pyaudio
 import os
 import time
 import hashlib
@@ -8,6 +7,7 @@ import psutil
 from pathlib import Path
 import qrcode
 from PIL import Image, ImageDraw
+from contextlib import contextmanager
 
 from PySide6.QtCore import QThread, Signal, Qt, QTimer, QSize, QMutex, QPropertyAnimation, QEasingCurve
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
@@ -30,6 +30,25 @@ from AiReply import AiReply
 from TTSModel import TTSModel
 from smooth_scroll_list import SmoothScrollList
 from knowledge_manager import knowledge_manager
+
+
+@contextmanager
+def suppress_stderr_fd():
+    """Context manager to temporarily redirect stderr to /dev/null to suppress ALSA/JACK initialization messages"""
+    try:
+        fd = sys.stderr.fileno()
+    except Exception:
+        # If sys.stderr has no fileno (e.g. some GUIs), just run without suppression
+        yield
+        return
+    with open(os.devnull, 'w') as devnull:
+        old = os.dup(fd)
+        try:
+            os.dup2(devnull.fileno(), fd)
+            yield
+        finally:
+            os.dup2(old, fd)
+            os.close(old)
 
 
 # 配置常量
@@ -495,18 +514,22 @@ class AudioPlayThread(QThread):
             self._lock.unlock()
 
             with open(self.audio_path, 'rb') as f:
-                self._p = pyaudio.PyAudio()
+                # Lazy import and suppress stderr during PyAudio initialization
+                with suppress_stderr_fd():
+                    import pyaudio
+                    self._p = pyaudio.PyAudio()
 
                 format = pyaudio.paInt16 if self.bit_depth == 16 else pyaudio.paInt32
 
                 # 针对香橙派优化的音频参数
-                self._stream = self._p.open(
-                    format=format,
-                    channels=self.channels,
-                    rate=self.sample_rate,
-                    output=True,
-                    frames_per_buffer=Config.AUDIO_CHUNK_SIZE
-                )
+                with suppress_stderr_fd():
+                    self._stream = self._p.open(
+                        format=format,
+                        channels=self.channels,
+                        rate=self.sample_rate,
+                        output=True,
+                        frames_per_buffer=Config.AUDIO_CHUNK_SIZE
+                    )
 
                 # 使用更小的块大小，减少延迟
                 chunk_size = Config.AUDIO_CHUNK_SIZE
@@ -1123,7 +1146,9 @@ class ChatWindow(QWidget):
             QMessageBox.warning(self, "设备错误", "请检查麦克风连接")
             return
         try:
-            audio = pyaudio.PyAudio()
+            with suppress_stderr_fd():
+                import pyaudio
+                audio = pyaudio.PyAudio()
             device_info = audio.get_device_info_by_index(self.target_device_index)
             print(f"✅ 已连接设备：{device_info['name']}")
             audio.terminate()
@@ -1461,7 +1486,9 @@ class ChatWindow(QWidget):
 
     def get_device_index_by_name(self, target_name):
         """获取音频设备索引，模糊匹配"""
-        audio = pyaudio.PyAudio()
+        with suppress_stderr_fd():
+            import pyaudio
+            audio = pyaudio.PyAudio()
         try:
             for i in range(audio.get_device_count()):
                 device_info = audio.get_device_info_by_index(i)
@@ -1639,7 +1666,9 @@ def validate_environment(has_default_api_key, has_default_base_url):
 
     # 其他检查（音频设备、内存）
     try:
-        audio = pyaudio.PyAudio()
+        with suppress_stderr_fd():
+            import pyaudio
+            audio = pyaudio.PyAudio()
         device_count = audio.get_device_count()
         if device_count == 0:
             errors.append("未找到任何音频设备")

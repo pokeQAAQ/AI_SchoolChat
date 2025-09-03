@@ -1,9 +1,29 @@
 """音频播放线程"""
 import time
 import wave
-import pyaudio
 import os
+import sys
+from contextlib import contextmanager
 from PySide6.QtCore import QThread, Signal, QMutex, QMutexLocker
+
+
+@contextmanager
+def suppress_stderr_fd():
+    """Context manager to temporarily redirect stderr to /dev/null to suppress ALSA/JACK initialization messages"""
+    try:
+        fd = sys.stderr.fileno()
+    except Exception:
+        # If sys.stderr has no fileno (e.g. some GUIs), just run without suppression
+        yield
+        return
+    with open(os.devnull, 'w') as devnull:
+        old = os.dup(fd)
+        try:
+            os.dup2(devnull.fileno(), fd)
+            yield
+        finally:
+            os.dup2(old, fd)
+            os.close(old)
 
 
 class AudioPlayThread(QThread):
@@ -54,20 +74,25 @@ class AudioPlayThread(QThread):
     def _play_wav(self):
         """播放WAV文件"""
         self._wf = wave.open(self.audio_path, 'rb')
-        self._p = pyaudio.PyAudio()
+        
+        # Lazy import and suppress stderr during PyAudio initialization
+        with suppress_stderr_fd():
+            import pyaudio
+            self._p = pyaudio.PyAudio()
 
         # 获取设备信息
         device_info = self._get_device_info()
 
-        # 打开音频流
-        self._stream = self._p.open(
-            format=self._p.get_format_from_width(self._wf.getsampwidth()),
-            channels=self._wf.getnchannels(),
-            rate=self._wf.getframerate(),
-            output=True,
-            output_device_index=device_info["index"],
-            frames_per_buffer=self._buffer_size
-        )
+        # 打开音频流 - also suppress stderr during stream opening
+        with suppress_stderr_fd():
+            self._stream = self._p.open(
+                format=self._p.get_format_from_width(self._wf.getsampwidth()),
+                channels=self._wf.getnchannels(),
+                rate=self._wf.getframerate(),
+                output=True,
+                output_device_index=device_info["index"],
+                frames_per_buffer=self._buffer_size
+            )
 
         # 播放数据
         data = self._wf.readframes(self._buffer_size)
@@ -88,7 +113,10 @@ class AudioPlayThread(QThread):
     def _play_pcm(self):
         """播放PCM文件"""
         with open(self.audio_path, 'rb') as f:
-            self._p = pyaudio.PyAudio()
+            # Lazy import and suppress stderr during PyAudio initialization
+            with suppress_stderr_fd():
+                import pyaudio
+                self._p = pyaudio.PyAudio()
 
             # PCM格式映射
             format = pyaudio.paInt16 if self.bit_depth == 16 else pyaudio.paInt32
@@ -96,15 +124,16 @@ class AudioPlayThread(QThread):
             # 获取设备信息
             device_info = self._get_device_info()
 
-            # 打开音频流
-            self._stream = self._p.open(
-                format=format,
-                channels=self.channels,
-                rate=self.sample_rate,
-                output=True,
-                output_device_index=device_info["index"],
-                frames_per_buffer=self._buffer_size
-            )
+            # 打开音频流 - also suppress stderr during stream opening
+            with suppress_stderr_fd():
+                self._stream = self._p.open(
+                    format=format,
+                    channels=self.channels,
+                    rate=self.sample_rate,
+                    output=True,
+                    output_device_index=device_info["index"],
+                    frames_per_buffer=self._buffer_size
+                )
 
             # 播放数据
             chunk_size = self._buffer_size * self.channels * (self.bit_depth // 8)

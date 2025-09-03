@@ -2,7 +2,7 @@
 import sys
 import os
 import time
-import pyaudio
+from contextlib import contextmanager
 from PySide6.QtCore import Qt, QTimer, QMutex, QSize
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidget,
                               QProgressBar, QFrame, QLabel, QPushButton,
@@ -21,6 +21,27 @@ from RecordThread import RecordThread
 from AiIOPut import AiIOPut
 from AiReply import AiReply
 from TTSModel import TTSModel
+
+
+@contextmanager
+def suppress_stderr_fd():
+    """Context manager to temporarily redirect stderr to /dev/null to suppress ALSA/JACK initialization messages"""
+    try:
+        fd = sys.stderr.fileno()
+    except Exception:
+        # If sys.stderr has no fileno (e.g. some GUIs), just run without suppression
+        yield
+        return
+    with open(os.devnull, 'w') as devnull:
+        old = os.dup(fd)
+        try:
+            os.dup2(devnull.fileno(), fd)
+            yield
+        finally:
+            os.dup2(old, fd)
+            os.close(old)
+
+
 class ChatWindow(QWidget):
     """聊天主窗口"""
     def __init__(self, api_key, base_url):
@@ -263,7 +284,9 @@ class ChatWindow(QWidget):
             return
 
         try:
-            audio = pyaudio.PyAudio()
+            with suppress_stderr_fd():
+                import pyaudio
+                audio = pyaudio.PyAudio()
             device_info = audio.get_device_info_by_index(self.target_device_index)
             print(f"✅ 已连接设备：{device_info['name']}")
             audio.terminate()
@@ -475,7 +498,9 @@ class ChatWindow(QWidget):
         self.play_thread.start()
 
     def get_device_index_by_name(self, target_name):
-        audio = pyaudio.PyAudio()
+        with suppress_stderr_fd():
+            import pyaudio
+            audio = pyaudio.PyAudio()
         try:
             for i in range(audio.get_device_count()):
                 device_info = audio.get_device_info_by_index(i)
