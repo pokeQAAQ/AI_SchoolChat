@@ -31,6 +31,14 @@ from AiIOPut import AiIOPut
 from AiReply import AiReply
 from TTSModel import TTSModel
 
+# Import PersistentRecordManager for arecord-based recording (preferred)
+try:
+    from PersistentRecordManager import PersistentRecordManager
+    HAS_PERSISTENT_RECORDER = True
+except ImportError:
+    HAS_PERSISTENT_RECORDER = False
+    print("⚠️ PersistentRecordManager不可用，将使用RecordThread（包含PyAudio依赖）")
+
 
 # 替换PyAudio设备检测函数为无操作函数，避免ALSA/JACK错误
 def check_device():
@@ -51,6 +59,7 @@ class ChatWindow(QWidget):
 
         # 初始化变量
         self.recorder = None
+        self.persistent_recorder = None  # 添加持久录音管理器
         self.ai_handle = None
         self.current_play_thread = None
         self.conversation_history = [
@@ -60,6 +69,18 @@ class ChatWindow(QWidget):
         # 设备初始化
         self.target_device_name = "MIC"
         self.target_device_index = self.get_device_index_by_name(self.target_device_name)
+
+        # 初始化持久录音管理器（如果可用）
+        if HAS_PERSISTENT_RECORDER:
+            try:
+                self.persistent_recorder = PersistentRecordManager(self.target_device_index)
+                # 连接信号
+                self.persistent_recorder.recording_finished.connect(self.on_recording_finished)
+                self.persistent_recorder.update_text.connect(self.print_to_terminal)
+                print("✅ 已初始化PersistentRecordManager（使用arecord，无PyAudio依赖）")
+            except Exception as e:
+                print(f"⚠️ PersistentRecordManager初始化失败: {e}")
+                self.persistent_recorder = None
 
         # 界面设置
         self.init_ui()
@@ -338,7 +359,18 @@ class ChatWindow(QWidget):
         print("准备开始录音...")
 
     def start_recording(self):
+        # 优先使用PersistentRecordManager（arecord，无PyAudio依赖）
+        if self.persistent_recorder:
+            try:
+                self.persistent_recorder.start_recording()
+                print("✅ 录音已开始（使用arecord，零延迟模式）")
+                return
+            except Exception as e:
+                print(f"⚠️ PersistentRecordManager录音失败: {e}")
+        
+        # 回退到RecordThread（使用PyAudio）
         if not self.recorder or not self.recorder.isRunning():
+            print("⚠️ 回退到RecordThread（包含PyAudio依赖）")
             self.recorder = RecordThread(self.target_device_index)
             self.thread_mutex.lock()
             self.active_threads.append(self.recorder)
@@ -359,7 +391,18 @@ class ChatWindow(QWidget):
         """)
         self.record_hint.setText("长按按钮说话，松开发送")
 
+        # 优先停止PersistentRecordManager
+        if self.persistent_recorder:
+            try:
+                self.persistent_recorder.stop_recording()
+                print("✅ arecord录音已停止")
+                return
+            except Exception as e:
+                print(f"⚠️ 停止PersistentRecordManager录音失败: {e}")
+        
+        # 回退到RecordThread
         if self.recorder and self.recorder.isRunning():
+            print("⚠️ 停止RecordThread录音（PyAudio）")
             self.recorder.stop()
             self.recorder.wait()
             self.progress_bar.setVisible(False)
@@ -506,6 +549,13 @@ class ChatWindow(QWidget):
     def closeEvent(self, event):
         self.hold_timer.stop()
         self.setCursor(self._original_cursor)
+
+        # 清理PersistentRecordManager
+        if self.persistent_recorder:
+            try:
+                self.persistent_recorder.cleanup()
+            except Exception as e:
+                print(f"⚠️ PersistentRecordManager清理失败: {e}")
 
         self.thread_mutex.lock()
         for thread in self.active_threads:
