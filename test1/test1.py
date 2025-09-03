@@ -14,8 +14,8 @@ from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                                QPushButton, QLabel, QMessageBox,
                                QProgressBar, QFrame, QSizePolicy,
                                QListWidget, QListWidgetItem, QAbstractItemView, QScrollBar,
-                               QDialog, QTextEdit)
-from PySide6.QtGui import QPixmap, QIcon, QFont, QWheelEvent, QKeyEvent, QPainter, QBrush, QColor
+                               QDialog, QTextEdit, QMenu)
+from PySide6.QtGui import QPixmap, QIcon, QFont, QWheelEvent, QKeyEvent, QPainter, QBrush, QColor, QAction
 from playsound import playsound
 
 import io
@@ -797,6 +797,7 @@ class ChatWindow(QWidget):
 
         # 底部录音区域
         bottom_container = QWidget()
+        bottom_container.setObjectName("bottom_container")  # 添加对象名称
         bottom_container.setStyleSheet("background-color: white;")
         bottom_layout = QVBoxLayout(bottom_container)
         bottom_layout.setContentsMargins(20, 15, 20, 25)
@@ -839,12 +840,33 @@ class ChatWindow(QWidget):
 
         main_layout.addWidget(bottom_container, 2)
 
+        # 创建模型选择按钮
+        self.model_selection_btn = ModelSelectionButton(self)
+        
         # 绑定事件
         self.record_btn.pressed_signal.connect(self.prepare_recording)
         self.record_btn.released_signal.connect(self.stop_recording)
         self.new_chat_btn.clicked.connect(self.confirm_new_btn)
         self.knowledge_btn.clicked.connect(self.show_knowledge_qr)
         self.chat_list.itemDelegate().sizeHintChanged.connect(self.adjust_bubble_sizes)
+
+    def resizeEvent(self, event):
+        """窗口大小变化时调整气泡尺寸和按钮位置"""
+        super().resizeEvent(event)
+        # 延迟调整以避免频繁重绘
+        QTimer.singleShot(Config.UI_UPDATE_INTERVAL, self.adjust_bubble_sizes)
+        
+        # 调整模型选择按钮位置
+        if hasattr(self, 'model_selection_btn') and self.model_selection_btn:
+            # 将按钮定位在窗口的右下角，更靠近边缘
+            x = self.width() - self.model_selection_btn.width() - 10  # 减少右边距
+            y = self.height() - self.model_selection_btn.height() - 10  # 减少下边距
+            # 确保坐标不为负数
+            x = max(0, x)
+            y = max(0, y)
+            self.model_selection_btn.move(x, y)
+            self.model_selection_btn.raise_()  # 确保按钮在最前面
+            self.model_selection_btn.show()  # 确保按钮可见
 
     def wheelEvent(self, event):
         """处理鼠标滚轮事件"""
@@ -1093,12 +1115,6 @@ class ChatWindow(QWidget):
             widget = self.chat_list.itemWidget(item)
             if isinstance(widget, ChatBubble):
                 item.setSizeHint(widget.sizeHint())
-
-    def resizeEvent(self, event):
-        """窗口大小变化时调整气泡尺寸"""
-        super().resizeEvent(event)
-        # 延迟调整以避免频繁重绘
-        QTimer.singleShot(Config.UI_UPDATE_INTERVAL, self.adjust_bubble_sizes)
 
     def check_device(self):
         time.sleep(2)
@@ -1502,6 +1518,109 @@ class ChatWindow(QWidget):
         print("✅ 应用已安全关闭")
         event.accept()
 
+
+class ModelSelectionButton(QPushButton):
+    """模型选择按钮"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current_model = "火山引擎"  # 默认模型
+        self.model_icons = {}  # 存储模型图标
+        self.init_ui()
+        self.create_model_menu()
+        self.update_button_display()  # 初始化按钮显示
+        
+    def init_ui(self):
+        # 设置按钮样式
+        self.setStyleSheet("""
+            QPushButton {
+                background-color: #4a90e2;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 8px 15px;
+                font-size: 14px;
+                font-weight: bold;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: #3a70d9;
+            }
+            QPushButton:pressed {
+                background-color: #2a60c9;
+            }
+        """)
+        self.setFixedSize(120, 35)
+        
+        # 连接点击事件
+        self.clicked.connect(self.show_model_menu)
+        
+    def create_model_menu(self):
+        """创建模型选择菜单"""
+        self.model_menu = QMenu(self)
+        self.model_menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 8px 20px 8px 10px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #4a90e2;
+                color: white;
+            }
+        """)
+        
+        # 添加模型选项
+        models = [
+            ("火山引擎", "/home/orangepi/program/LTChat_updater/app/test1/AI_Icon/火山引擎.png"),
+            ("文心一言", "/home/orangepi/program/LTChat_updater/app/test1/AI_Icon/文心一言.png"),
+            ("通义千问", "/home/orangepi/program/LTChat_updater/app/test1/AI_Icon/通义千问.png"),
+            ("deepseek", "/home/orangepi/program/LTChat_updater/app/test1/AI_Icon/deepseek.png")
+        ]
+        
+        self.model_actions = []
+        for model_name, icon_path in models:
+            action = QAction(model_name, self.model_menu)
+            if os.path.exists(icon_path):
+                icon = QIcon(icon_path)
+                action.setIcon(icon)
+                # 保存图标以便后续使用
+                self.model_icons[model_name] = icon
+            self.model_menu.addAction(action)
+            self.model_actions.append((action, model_name))
+            
+        # 连接动作信号
+        for action, model_name in self.model_actions:
+            action.triggered.connect(lambda checked, name=model_name: self.select_model(name))
+            
+    def show_model_menu(self):
+        """显示模型选择菜单"""
+        # 在按钮下方显示菜单
+        pos = self.mapToGlobal(self.rect().bottomLeft())
+        self.model_menu.exec(pos)
+        
+    def select_model(self, model_name):
+        """选择模型"""
+        self.current_model = model_name
+        self.update_button_display()
+        # 这里可以添加处理模型选择的逻辑
+        print(f"选择了模型: {model_name}")
+        
+    def update_button_display(self):
+        """更新按钮显示"""
+        # 设置按钮文本
+        self.setText(self.current_model)
+        
+        # 如果有对应的图标，则设置图标
+        if self.current_model in self.model_icons:
+            icon = self.model_icons[self.current_model]
+            self.setIcon(icon)
+            self.setIconSize(QSize(20, 20))  # 设置图标大小
 
 def validate_environment(has_default_api_key, has_default_base_url):
     """验证运行环境，判断是否有代码默认值"""
