@@ -9,6 +9,10 @@ from pathlib import Path
 import qrcode
 from PIL import Image, ImageDraw
 
+# 添加多进程支持
+import multiprocessing
+from multiprocessing import Process
+
 from PySide6.QtCore import QThread, Signal, Qt, QTimer, QSize, QMutex, QPropertyAnimation, QEasingCurve
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                                QPushButton, QLabel, QMessageBox,
@@ -1622,39 +1626,79 @@ class ModelSelectionButton(QPushButton):
             self.setIcon(icon)
             self.setIconSize(QSize(20, 20))  # 设置图标大小
 
-def validate_environment(has_default_api_key, has_default_base_url):
-    """验证运行环境，判断是否有代码默认值"""
+
+def validate_environment(has_default_api, has_default_base):
+    """验证运行环境"""
     errors = []
 
-    # 检查必要的环境变量（如果没有代码默认值，则必须从环境变量获取）
-    required_vars = []
-    if not has_default_api_key:
-        required_vars.append("AI_API_KEY")
-    if not has_default_base_url:
-        required_vars.append("AI_BASE_URL")
-
-    for var in required_vars:
-        if not os.environ.get(var):
-            errors.append(f"缺少环境变量: {var}")
-
-    # 其他检查（音频设备、内存）
     try:
+        # 检查必要组件
+        import pyaudio
+        import qrcode
+        import psutil
+        import sqlite3
+        from PySide6.QtWidgets import QApplication
+
+        # 检查音频设备
         audio = pyaudio.PyAudio()
         device_count = audio.get_device_count()
-        if device_count == 0:
-            errors.append("未找到任何音频设备")
         audio.terminate()
-    except Exception as e:
-        errors.append(f"音频系统错误: {e}")
 
-    try:
-        memory_mb = psutil.virtual_memory().available / 1024 / 1024
-        if memory_mb < 100:
-            errors.append(f"可用内存不足: {memory_mb:.1f}MB")
+        if device_count == 0:
+            errors.append("未检测到音频设备")
+
+        # 检查API配置
+        if not has_default_api and not os.environ.get("AI_API_KEY"):
+            errors.append("缺少API密钥配置")
+
+        if not has_default_base and not os.environ.get("AI_BASE_URL"):
+            errors.append("缺少API基础URL配置")
+
+        # 检查内存
+        try:
+            mem = psutil.virtual_memory()
+            if mem.available < 100 * 1024 * 1024:  # 小于100MB可用内存
+                errors.append("系统可用内存不足")
+        except Exception as e:
+            errors.append(f"内存检查错误: {e}")
+
     except Exception as e:
-        errors.append(f"内存检查错误: {e}")
+        errors.append(f"环境检查异常: {e}")
 
     return errors
+
+
+# 在文件末尾添加启动上传服务器的函数
+def start_upload_server():
+    """启动知识库上传服务器"""
+    try:
+        # 导入并启动上传服务器
+        from upload_server import app
+        
+        # 获取实际的IP地址
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            actual_ip = s.getsockname()[0]
+            s.close()
+        except:
+            actual_ip = "192.168.10.1"  # 默认值
+        
+        print("🚀 启动知识库上传服务器...")
+        print("📱 请用手机连接热点：OrangePi-Knowledge")
+        print(f"🔗 然后访问：http://{actual_ip}:8080")
+        print("=" * 50)
+        
+        # 启动Flask服务器
+        app.run(
+            host='0.0.0.0',  # 监听所有接口
+            port=8080,       # 使用8080端口
+            debug=False,     # 生产模式
+            threaded=True    # 支持多线程
+        )
+    except Exception as e:
+        print(f"❌ 上传服务器启动失败: {e}")
 
 
 if __name__ == '__main__':
@@ -1671,8 +1715,10 @@ if __name__ == '__main__':
     # 环境配置
     os.environ['QT_QPA_PLATFORM'] = 'xcb'
     os.environ['QT_FONT_DPI'] = '96'
+    os.environ['ALSA_PCM_PLUGIN'] = 'default'
 
     # 针对香橙派的优化设置
+    os.environ['PA_ALSA_PLUGHW'] = '1'
     os.environ['PA_STREAM_LATENCY'] = '60,60'
     os.environ['QT_QUICK_FLICKABLE_WHEEL_DECELERATION'] = '5000'
 
@@ -1692,6 +1738,12 @@ if __name__ == '__main__':
     API_KEY = SecurityManager.sanitize_text(API_KEY, 200)
     BASE_URL = SecurityManager.sanitize_text(BASE_URL, 200)
 
+    # 启动上传服务器进程
+    upload_process = Process(target=start_upload_server)
+    upload_process.daemon = True  # 设置为守护进程，主程序退出时自动退出
+    upload_process.start()
+    print("🔄 知识库上传服务器已在后台启动")
+    
     print("✅ 环境检查通过，正在启动应用...")
 
     # 初始化应用
