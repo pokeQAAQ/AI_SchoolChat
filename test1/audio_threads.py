@@ -1,9 +1,9 @@
 """音频播放线程"""
 import time
 import wave
-import pyaudio
 import os
 from PySide6.QtCore import QThread, Signal, QMutex, QMutexLocker
+from audio_utils import suppress_stderr_fd
 
 
 class AudioPlayThread(QThread):
@@ -54,7 +54,11 @@ class AudioPlayThread(QThread):
     def _play_wav(self):
         """播放WAV文件"""
         self._wf = wave.open(self.audio_path, 'rb')
-        self._p = pyaudio.PyAudio()
+        
+        # 懒加载 PyAudio 并抑制 stderr 消息
+        with suppress_stderr_fd():
+            import pyaudio
+            self._p = pyaudio.PyAudio()
 
         # 获取设备信息
         device_info = self._get_device_info()
@@ -88,7 +92,10 @@ class AudioPlayThread(QThread):
     def _play_pcm(self):
         """播放PCM文件"""
         with open(self.audio_path, 'rb') as f:
-            self._p = pyaudio.PyAudio()
+            # 懒加载 PyAudio 并抑制 stderr 消息
+            with suppress_stderr_fd():
+                import pyaudio
+                self._p = pyaudio.PyAudio()
 
             # PCM格式映射
             format = pyaudio.paInt16 if self.bit_depth == 16 else pyaudio.paInt32

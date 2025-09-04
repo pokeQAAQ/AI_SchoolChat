@@ -1,6 +1,5 @@
 import sys
 import wave
-import pyaudio
 import os
 import time
 import hashlib
@@ -30,6 +29,7 @@ from AiReply import AiReply
 from TTSModel import TTSModel
 from smooth_scroll_list import SmoothScrollList
 from knowledge_manager import knowledge_manager
+from audio_utils import suppress_stderr_fd
 
 
 # 配置常量
@@ -495,7 +495,10 @@ class AudioPlayThread(QThread):
             self._lock.unlock()
 
             with open(self.audio_path, 'rb') as f:
-                self._p = pyaudio.PyAudio()
+                # 懒加载 PyAudio 并抑制 stderr 消息
+                with suppress_stderr_fd():
+                    import pyaudio
+                    self._p = pyaudio.PyAudio()
 
                 format = pyaudio.paInt16 if self.bit_depth == 16 else pyaudio.paInt32
 
@@ -1123,7 +1126,10 @@ class ChatWindow(QWidget):
             QMessageBox.warning(self, "设备错误", "请检查麦克风连接")
             return
         try:
-            audio = pyaudio.PyAudio()
+            # 懒加载 PyAudio 并抑制 stderr 消息
+            with suppress_stderr_fd():
+                import pyaudio
+                audio = pyaudio.PyAudio()
             device_info = audio.get_device_info_by_index(self.target_device_index)
             print(f"✅ 已连接设备：{device_info['name']}")
             audio.terminate()
@@ -1461,7 +1467,10 @@ class ChatWindow(QWidget):
 
     def get_device_index_by_name(self, target_name):
         """获取音频设备索引，模糊匹配"""
-        audio = pyaudio.PyAudio()
+        # 懒加载 PyAudio 并抑制 stderr 消息
+        with suppress_stderr_fd():
+            import pyaudio
+            audio = pyaudio.PyAudio()
         try:
             for i in range(audio.get_device_count()):
                 device_info = audio.get_device_info_by_index(i)
@@ -1639,7 +1648,10 @@ def validate_environment(has_default_api_key, has_default_base_url):
 
     # 其他检查（音频设备、内存）
     try:
-        audio = pyaudio.PyAudio()
+        # 懒加载 PyAudio 并抑制 stderr 消息
+        with suppress_stderr_fd():
+            import pyaudio
+            audio = pyaudio.PyAudio()
         device_count = audio.get_device_count()
         if device_count == 0:
             errors.append("未找到任何音频设备")

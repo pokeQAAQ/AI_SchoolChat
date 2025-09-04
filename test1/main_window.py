@@ -2,13 +2,13 @@
 import sys
 import os
 import time
-import pyaudio
 from PySide6.QtCore import Qt, QTimer, QMutex, QSize
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidget,
                               QProgressBar, QFrame, QLabel, QPushButton,
                               QMessageBox, QAbstractItemView, QSizePolicy,
                               QListWidgetItem)  # 添加这一行！
 from PySide6.QtGui import QFont, QCursor
+from audio_utils import suppress_stderr_fd
 
 # 导入自定义组件和线程
 
@@ -263,7 +263,10 @@ class ChatWindow(QWidget):
             return
 
         try:
-            audio = pyaudio.PyAudio()
+            # 懒加载 PyAudio 并抑制 stderr 消息
+            with suppress_stderr_fd():
+                import pyaudio
+                audio = pyaudio.PyAudio()
             device_info = audio.get_device_info_by_index(self.target_device_index)
             print(f"✅ 已连接设备：{device_info['name']}")
             audio.terminate()
@@ -475,7 +478,10 @@ class ChatWindow(QWidget):
         self.play_thread.start()
 
     def get_device_index_by_name(self, target_name):
-        audio = pyaudio.PyAudio()
+        # 懒加载 PyAudio 并抑制 stderr 消息
+        with suppress_stderr_fd():
+            import pyaudio
+            audio = pyaudio.PyAudio()
         try:
             for i in range(audio.get_device_count()):
                 device_info = audio.get_device_info_by_index(i)
